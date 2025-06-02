@@ -5,7 +5,7 @@ import os
 
 N_CLASSES = 10
 
-def load_preprocessing_components(save_dir='preprocessing_components'):
+def load_preprocessing_components():
     components = {}
     filenames = [
         'knn_imputer.pkl',
@@ -16,12 +16,10 @@ def load_preprocessing_components(save_dir='preprocessing_components'):
         'n_polynomial_features.pkl'
     ]
     for fname in filenames:
-        path = os.path.join(save_dir, fname)
-        if os.path.exists(path):
-            key = fname.replace('.pkl', '')
-            with open(path, 'rb') as f:
-                components[key] = pickle.load(f)
+        with open(fname, 'rb') as f:
+            components[fname.replace('.pkl', '')] = pickle.load(f)
     return components
+
 
 def apply_preprocessing(X_raw, components):
     # Step 1: Drop column 46 if present
