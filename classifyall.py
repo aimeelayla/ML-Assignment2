@@ -7,79 +7,86 @@ N_CLASSES = 10
 
 def load_preprocessing_components(save_dir='preprocessing_components'):
     components = {}
-    component_files = [
+    filenames = [
         'knn_imputer.pkl',
-        'variance_selector.pkl', 
+        'variance_selector.pkl',
         'robust_scaler.pkl',
         'feature_selector.pkl',
-        'k_features.pkl',
-        'n_polynomial_features.pkl',
-        'original_feature_count.pkl'
+        'interaction_terms.pkl',
+        'n_polynomial_features.pkl'
     ]
-    for filename in component_files:
-        filepath = os.path.join(save_dir, filename)
-        if os.path.exists(filepath):
-            component_name = filename.replace('.pkl', '')
-            with open(filepath, 'rb') as f:
-                components[component_name] = pickle.load(f)
+    for fname in filenames:
+        path = os.path.join(save_dir, fname)
+        if os.path.exists(path):
+            key = fname.replace('.pkl', '')
+            with open(path, 'rb') as f:
+                components[key] = pickle.load(f)
     return components
 
 def apply_preprocessing(X_raw, components):
-    # Step 1: Remove text column (46)
+    # Step 1: Drop column 46 if present
     if 46 in X_raw.columns:
         X_processed = X_raw.drop(columns=[46]).copy()
     else:
         X_processed = X_raw.copy()
 
-    # Step 2: KNN imputation
+    # Step 2: Impute missing values
     X_processed = pd.DataFrame(components['knn_imputer'].transform(X_processed))
 
-    # Step 3: Polynomial features (square top features)
-    n_features = components['n_polynomial_features']
-    for i in range(n_features):
-        if i < X_processed.shape[1]:
-            X_processed[f'feature_{i}_squared'] = X_processed.iloc[:, i] ** 2
-    X_processed.columns = [str(col) for col in X_processed.columns]
+    # Step 3: Polynomial features (squares + interactions for top-N features)
+    n = components['n_polynomial_features']
+    base = X_processed.iloc[:, :n].copy()
 
-    # Step 4: Variance threshold
+    # Add squared terms
+    for i in range(n):
+        X_processed[f'feature_{i}_squared'] = base.iloc[:, i] ** 2
+
+    # Add interaction terms
+    poly = components['interaction_terms']
+    interaction_features = poly.transform(base)
+    interaction_only = interaction_features[:, n:]  # remove original features
+
+    for idx in range(interaction_only.shape[1]):
+        X_processed[f'interaction_{idx}'] = interaction_only[:, idx]
+
+    # Ensure all column names are strings
+    X_processed.columns = X_processed.columns.astype(str)
+
+    # Step 4: Remove low variance features
     X_processed = pd.DataFrame(components['variance_selector'].transform(X_processed))
 
     # Step 5: Robust scaling
-    X_scaled = components['robust_scaler'].transform(X_processed)
-    X_scaled = pd.DataFrame(X_scaled)
+    X_scaled = pd.DataFrame(components['robust_scaler'].transform(X_processed))
 
     # Step 6: Feature selection
-    X_final = components['feature_selector'].transform(X_scaled)
-    X_final = pd.DataFrame(X_final)
+    X_final = pd.DataFrame(components['feature_selector'].transform(X_scaled))
 
     return X_final
 
 def main():
-    # READ IN TEST DATA
-    test_data = pd.read_csv("testdata.txt", header=None)
-    n_datapoints = test_data.shape[0]
+    # Load raw test data
+    X_raw = pd.read_csv("testdata.txt", header=None)
 
-    # LOAD PREPROCESSING COMPONENTS
+    # Load preprocessing components
     components = load_preprocessing_components()
 
-    # APPLY PREPROCESSING TO TEST DATA
-    X_test = apply_preprocessing(test_data, components)
+    # Apply transformations
+    X_processed = apply_preprocessing(X_raw, components)
 
-    # LOAD TRAINED MODEL
-    with open('trained_model.pkl', 'rb') as f:
+    # Load trained model
+    with open("trained_model.pkl", "rb") as f:
         model = pickle.load(f)
 
-    # PREDICT LABELS
-    infer_labels = model.predict(X_test)
-    infer_labels = pd.DataFrame(infer_labels)
+    # Predict labels
+    y_pred = model.predict(X_processed)
+    y_pred = pd.DataFrame(y_pred)
 
-    # VALIDATE & SAVE INFERRED LABELS
-    assert isinstance(infer_labels, pd.DataFrame), f"infer_labels should be a DataFrame, got {type(infer_labels)}"
-    assert infer_labels.shape == (n_datapoints, 1), f"Shape should be {(n_datapoints, 1)} but is {infer_labels.shape}"
-    assert infer_labels.iloc[:, 0].between(0, N_CLASSES-1).all(), "Predicted labels must be between 0 and 9"
+    # Sanity checks
+    assert y_pred.shape == (X_raw.shape[0], 1)
+    assert y_pred.iloc[:, 0].between(0, N_CLASSES - 1).all()
 
-    infer_labels.to_csv("predlabels.txt", index=False, header=False)
-
+    # Save to file
+    y_pred.to_csv("predlabels.txt", index=False, header=False)
 
 if __name__ == "__main__":
     main()
